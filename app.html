@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meowchat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="avatarModal">
+    <h2>Choisissez votre avatar</h2>
+    <ul id="avatar-options">
+      <li><img class="avatar-image" id="avatar-image" src="/shrek.jpg"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/morty.jpg"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/cowgirl.png"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/cuirasse.jpg"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/colossal.jpg"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/rick.jpeg"></li>
+      <li><img class="avatar-image" id="avatar-image" src="/trex.png"></li>
+    </ul>
+  </div>
+  <!-- Contenu de la page -->
+  <ul id="messages"></ul> <!-- Zone pour afficher les messages -->
+  <div id="status-messages"></div> <!-- Zone pour afficher les messages de statut -->
+  <div id="user-list"></div>  <!-- Zone pour afficher la liste des utilisateurs -->
+  <form id="form" action="">
+    <!-- Ajout du sidebar -->
+    <div id="sidebar-right">
+      <!-- Titre du menu des messages privés -->
+      <div id="private-message-title">Discussions privées</div> 
+      <!-- Liste des utilisateurs pour les messages privés -->
+      <div id="private-message-list"></div>
+      <!-- Titre des channels -->
+      <div id="channels-message-title">Channels</div>
+      <!-- Liste des channels -->
+      <div id="channel-list"></div>
+      <!-- Conteneur des messages du salon -->
+      <div id="channel-chat-messages"></div>
+      <div id="add-channel-button">Ajouter un salon</div>
+    </div>
+    <!-- Modal pour les conversations privées -->
+    <div id="private-chat-modal" class="modal">
+      <div class="modal-content">
+        <!-- Bouton de fermeture du modal -->
+        <span class="close-button">&times;</span>
+        <!-- Titre du modal avec le nom de l'utilisateur sélectionné -->
+        <h2>Chat with <span id="private-chat-user"></span></h2>
+        <!-- Liste des messages de la conversation privée -->
+        <ul id="private-chat-messages"></ul>
+        <!-- Champ de saisie du message -->
+        <input id="private-chat-input" type="text" placeholder="Type your message...">
+        <!-- Bouton pour envoyer le message dans la conversation privée -->
+        <button id="private-chat-send-button">send</button>
+      </div>
+    </div>
+    <!-- Modal pour ajouter des utilisateurs au groupe -->
+    <div id="add-channel-modal" class="modal">
+      <div class="modal-content">
+        <span class="close-button">&times;</span>
+        <h2>Ajouter des utilisateurs au groupe:</h2>
+        <!-- Zone de texte pour choisir le nom du groupe -->
+        <input type="text" id="group-name-input" placeholder="Nom du groupe">
+        <div id="user-list-modal"></div>
+        <button id="start-group-button">Créer le groupe</button>
+      </div>
+    </div>
+    <!-- Formulaire pour les messages -->
+    <input id="input" autocomplete="off" /><button>Send</button>
+  </form>
+  <!-- JavaScript -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Connexion au serveur Socket.io
+    const socket = io();
+
+    // Variables globales pour l'interface utilisateur
+    const messages = document.getElementById('messages');
+    const statusMessages = document.getElementById('status-messages');
+    const userList = document.getElementById('user-list');
+    const privateMessageMenu = document.getElementById('sidebar-right');
+    const privateMessageButton = document.getElementById('private-message-button');
+    const privateMessageListContainer = document.getElementById('private-message-list');
+    const selectedUsernames= "";
+    const input = document.getElementById('input');
+    let username;
+    let typingTimeout;
+    let isTyping = false;
+    let chosenAvatar;
+    const avatarModal = document.getElementById('avatarModal');
+    avatarModal.style.display = 'block';
+    var avatarOption = document.getElementById('avatar-image');
+    const avatarOptions = document.querySelectorAll('.avatar-image');
+    // Événement lors du clic sur le bouton "Ajouter un salon"
+    const addChannelButton = document.getElementById('add-channel-button');
+    addChannelButton.addEventListener('click', () => {
+      const modal = document.getElementById('add-channel-modal');
+      modal.style.display = 'block';
+      // Récupérer la liste des utilisateurs en ligne et les afficher dans le modal
+      socket.emit('get users', (usernames) => {
+        const userListModal = document.getElementById('user-list-modal');
+        userListModal.innerHTML = ''; // Effacer le contenu précédent
+
+        // Créer des éléments HTML pour chaque utilisateur
+        usernames.forEach((username) => {
+          const userItem = document.createElement('div');
+          userItem.textContent = username;
+          userItem.classList.add('user-list-item-modal');
+
+          // Événement lors du clic sur un utilisateur pour ouvrir la conversation privée
+          userItem.addEventListener('click', () => {
+            // Ajouter la classe 'selected' à l'utilisateur cliqué
+            userItem.classList.add('selected');
+            // Ouvrir le modal de conversation privée avec l'utilisateur sélectionné
+            updateGroupMembers();
+          });
+          userListModal.appendChild(userItem);
+          // Fonction pour mettre à jour la liste des membres du groupe
+          function updateGroupMembers() {
+            const selectedGroupUsers = document.querySelectorAll('.user-list-item-modal.selected');
+            selectedUsernames = Array.from(selectedUsers).map((user) => user.textContent);
+          }
+        });
+      });
+    });
+
+// Fonction pour mettre à jour la liste des channels dans le menu des messages privés
+function updateChannelList() {
+  const channelList = document.getElementById('channel-list');
+
+  // Supprimer tous les listeners d'événements click précédents pour éviter les doublons
+  channelList.querySelectorAll('.user-list-item-modal').forEach((channel) => {
+    channel.removeEventListener('click', channelClickHandler);
+  });
+
+  // Événement lors du clic sur un channel pour ouvrir la conversation
+  function channelClickHandler() {
+    // Supprimer la classe 'selected' de tous les channels
+    channelList.querySelectorAll('.user-list-item-modal').forEach((item) => {
+      item.classList.remove('selected');
+    });
+    // Ajouter la classe 'selected' au channel cliqué
+    this.classList.add('selected');
+    openPrivateChatModal(this.textContent);
+  }
+
+  // Récupérer tous les canaux existants
+  const existingChannels = channelList.children;
+
+  // Attacher un écouteur d'événement click à chaque canal
+  Array.from(existingChannels).forEach((channel) => {
+    channel.addEventListener('click', channelClickHandler);
+  });
+}
+    // Événement lors du clic sur le bouton de fermeture du modal
+    const closeButtonModal = document.querySelector('#add-channel-modal .close-button');
+    closeButtonModal.addEventListener('click', () => {
+      const modal = document.getElementById('add-channel-modal');
+      modal.style.display = 'none';
+    });
+
+    // Événement lors du clic sur le bouton "Créer le groupe"
+    const startGroupButton = document.getElementById('start-group-button');
+    startGroupButton.addEventListener('click', () => {
+      // Récupérer le nom du groupe depuis la zone de texte
+      const groupNameInput = document.getElementById('group-name-input');
+      const groupName = groupNameInput.value;
+
+      // Mettre à jour la barre latérale avec le nom du groupe
+      const channelList = document.getElementById('channel-list');
+      const groupNameElement = document.createElement('div');
+      groupNameElement.textContent = groupName;
+      groupNameElement.classList.add('user-list-item-modal');
+      channelList.appendChild(groupNameElement);
+      updateChannelList();
+    });
+
+    function getUsername(){
+      while (!username) {
+        username = prompt("Entrez votre pseudonyme :");
+      }
+      socket.emit('set username', {username, avatar : chosenAvatar});
+    }
+    function chooseAvatar(avatar){
+      chosenAvatar = avatar;
+      avatarModal.style.display = 'none';
+      getUsername();
+    }
+
+avatarOptions.forEach((avatarOption) => {
+    avatarOption.addEventListener('click', function() {
+        console.log("click");
+        chooseAvatar(avatarOption.src); // Appel de la fonction chooseAvatar avec le chemin d'avatar de l'image cliquée
+    });
+});
+
+    // Fonction pour mettre à jour la liste des utilisateurs dans le menu des messages privés
+    function updatePrivateMessageList(usernames) {
+      privateMessageListContainer.innerHTML = '';
+
+      usernames.forEach((user) => {
+        const userItem = document.createElement('div');
+        userItem.textContent = user;
+        userItem.classList.add('private-message-user');
+        // Événement lors du clic sur un utilisateur pour ouvrir la conversation privée
+        userItem.addEventListener('click', () => {
+          // Supprimer la classe 'selected' de tous les utilisateurs
+          document.querySelectorAll('channel-list').forEach((item) => {
+            item.classList.remove('selected');
+          });
+          // Ajouter la classe 'selected' à l'utilisateur cliqué
+          userItem.classList.add('selected');
+          // Ouvrir le modal de conversation privée avec l'utilisateur sélectionné
+          openPrivateChatModal(user);
+        });
+        privateMessageListContainer.appendChild(userItem);
+      });
+    }
+
+    // Fonction pour ouvrir le modal de conversation privée avec l'utilisateur sélectionné
+    function openPrivateChatModal(selectedUser) {
+      const modal = document.getElementById('private-chat-modal');
+      const privateChatUser = document.getElementById('private-chat-user');
+      privateChatUser.textContent = selectedUser;
+      modal.style.display = 'block';
+    }
+
+    // Événement lors du clic sur le bouton de fermeture du modal de conversation privée
+    const closeButton = document.querySelector('.close-button');
+    closeButton.addEventListener('click', () => {
+      const modal = document.getElementById('private-chat-modal');
+      modal.style.display = 'none';
+      // Supprimer la classe 'selected' de tous les utilisateurs dans la liste des messages privés
+      document.querySelectorAll('.user-list-item-modal').forEach((item) => {
+        item.classList.remove('selected');
+      });
+      document.querySelectorAll('.private-message-user').forEach((item) => {
+        item.classList.remove('selected');
+      });
+    });
+    
+    // Événement lors de la soumission du formulaire pour envoyer un message
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (input.value) {
+        // Émission d'un événement au serveur pour envoyer le message
+        socket.emit('chat message', { from: username, text: input.value, avatar: chosenAvatar });
+        input.value = '';
+
+        // Effacer le message "en train d'écrire..." s'il est visible
+        clearTypingMessage();
+
+        // Réinitialisation du délai après avoir envoyé le message
+        clearTimeout(typingTimeout);
+        if (isTyping) {
+          socket.emit('stop typing', username);
+          isTyping = false;
+        }
+      }
+    });
+
+    // Fonction pour effacer le message "en train d'écrire..."
+    function clearTypingMessage() {
+      const typingMessage = document.getElementById('typing-message');
+      if (typingMessage) {
+        typingMessage.remove();
+      }
+    }
+
+    // Fonction pour afficher une notification à l'utilisateur
+    function showNotification(message) {
+      const notification = document.createElement('div');
+      notification.className = 'notification';
+      notification.textContent = message;
+      document.body.appendChild(notification);
+
+      // Masquer la notification après un certain délai
+      setTimeout(() => {
+        document.body.removeChild(notification);
+      }, 3000);
+    }
+
+    // Événements Socket.io pour la gestion des utilisateurs et des messages
+    socket.on('user connected', (connectedUsername) => {
+      showNotification(`${connectedUsername} s'est connecté`);
+      updateUsersList(); // Mettre à jour la liste des utilisateurs à chaque connexion
+    });
+
+    socket.on('user disconnected', (disconnectedUsername) => {
+      showNotification(`${disconnectedUsername} s'est déconnecté`);
+      updateUsersList(); // Mettre à jour la liste des utilisateurs à chaque déconnexion
+    });
+
+    socket.on('chat message', (msg) => {
+      // Affichage du message dans la liste des messages
+      const item = document.createElement('li');
+      const userLabel = document.createElement('div');
+      userLabel.className = 'user-label';
+      userLabel.textContent = msg.from;
+      userLabel.innerHTML = `<img src="${msg.avatar}"  class="user-avatar" /> ${msg.from}`;
+      item.appendChild(userLabel);
+      const messageText = document.createElement('div');
+      messageText.className = 'message-text';
+      messageText.textContent = msg.text;
+      item.appendChild(messageText);
+      messages.appendChild(item);
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    socket.on('typing', (typingUsername) => {
+      // Affichage du message de saisie en cours
+      displayStatusMessage(`${typingUsername} est en train d'écrire...`);
+    });
+
+    // Fonction pour mettre à jour la liste des utilisateurs
+    function updateUsersList() {
+      // Émission d'un événement au serveur pour obtenir la liste des utilisateurs
+      socket.emit('get users', (usernames) => {
+        // Affichage de la liste des utilisateurs dans l'élément user-list
+        userList.innerHTML =` <strong>En ligne :</strong> ${usernames.join(', ')}`;
+        updatePrivateMessageList(usernames);
+      });
+    }
+
+    // Fonction pour afficher un message de statut
+    function displayStatusMessage(message) {
+      const existingTypingMessage = document.getElementById('typing-message');
+      if (existingTypingMessage) {
+        // Supprimer l'élément s'il existe déjà
+        existingTypingMessage.remove();
+      }
+      const statusItem = document.createElement('div');
+      statusItem.id = 'typing-message'; // Définir l'identifiant pour référence future
+      statusItem.textContent = message;
+      statusMessages.appendChild(statusItem);
+    }
+
+    // Événement lors de la saisie dans le champ de texte
+    input.addEventListener('input', () => {
+      if (!isTyping) {
+        // Émission d'un événement au serveur pour indiquer que l'utilisateur est en train de saisir un message
+        socket.emit('typing', username);
+        isTyping = true;
+      }
+    });
+  </script>
+</body>
+</html>
